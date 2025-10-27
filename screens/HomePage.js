@@ -1,8 +1,9 @@
-import { StyleSheet, Text, View, StatusBar, Image, TouchableOpacity, Alert, Animated, Dimensions, PanResponder} from 'react-native'
+import { StyleSheet, Text, View, StatusBar, Image, TouchableOpacity, Alert, Animated, Dimensions, PanResponder, TextInput} from 'react-native'
 import {SafeAreaView} from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {useState,useEffect, useRef} from 'react';
 import Wheel from 'react-native-spin-the-wheel';
+import { Path, Defs, Text as SvgText, TextPath, Svg } from 'react-native-svg';
 
 const {height} = Dimensions.get('window');
 
@@ -11,6 +12,8 @@ export default function HomePage({navigation}) {
   const [winnerPost, setWinnerPost]=useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const slideAnim = useRef(new Animated.Value(height)).current;
+  const[user,setUser]=useState(null);
+  const[searchQuery,setSearchQuery]=useState("");
 
   const panResponder = useRef(
     PanResponder.create({
@@ -81,10 +84,44 @@ export default function HomePage({navigation}) {
       }
     }, 300);
   };
+  const handleSearch=()=>{
+    if(searchQuery.trim()){
+      navigation.navigate('SearchResult',{
+        query: searchQuery.trim(),
+      });
+      setSearchQuery('');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.rouletteHeaderText}>Le Roulette</Text>
+      <View style={styles.searchContainer}>
+        <TextInput 
+          style={styles.searchInput}
+          placeholder="Search user"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeHolderTextColor="#000"
+          onSubmitEditing={handleSearch}
+          returnKeyType="search"
+        />
+        <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
+          <Image style={styles.searchIcon} source={require('../assets/search.png')}/>
+        </TouchableOpacity>
+      </View>
+      <Svg height="180" width="400" style={styles.rouletteHeaderText} viewBox="0 0 400 150">
+        <Defs>
+          <Path
+            id="curve"
+            d="M 50 120 Q 200 30 350 120"
+            fill="transparent"/>
+        </Defs>
+        <SvgText fill="#FFCC00" fontSize="65" fontWeight="bold">
+          <TextPath href="#curve" textAnchor="middle" startOffset={'-1%'}>
+            Le Roulette
+          </TextPath>
+        </SvgText>
+      </Svg>      
       <StatusBar barStyle={'light-content'}/>
       <View style={styles.wheelContainer}>
         <View style={styles.wheelWrapper}>
@@ -224,7 +261,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
-    bottom:35,
+    bottom:40,
   },
   lightbulbsImage: {
     position: 'absolute',
@@ -300,11 +337,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   rouletteHeaderText:{
-    color:"#FFCC00",
-    fontSize:65,
     position:'absolute',
     alignSelf:'center',
-    marginTop:30,
+    top:80,
   },
   viewPostBtn:{
     backgroundColor:"#0000B3",
@@ -387,5 +422,28 @@ const styles = StyleSheet.create({
   logoutText: {
     color: '#FF3B30',
     fontWeight: '600',
+  },
+  searchContainer:{
+    flexDirection:'row',
+    alignItems:'center',
+    backgroundColor:"#f3f3f3ff",
+    borderRadius:10,
+    paddingHorizontal:15,
+    marginHorizontal:20,
+    marginTop:10,
+    height:45,
+  },
+  searchInput:{
+    flex:1,
+    fontSize:15,
+    color:"#000"
+  },
+  searchButton:{
+    padding:5,
+  },
+  searchIcon:{
+    width:20,
+    height:20,
+    tintColor:'#7D0AD1',
   },
 })
