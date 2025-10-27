@@ -19,6 +19,8 @@ import SignUp from "./screens/SignUp";
 import Slots from "./screens/Slots";
 import ViewPost from "./screens/ViewPost";
 import WelcomePage from "./screens/WelcomePage";
+import SearchResult from "./screens/SearchResult";
+
 const Stack = createNativeStackNavigator();
 
 export default function App() {
@@ -37,6 +39,7 @@ export default function App() {
           <Stack.Screen name="Slots" component={Slots} options={{headerShown:false}}/>
           <Stack.Screen name="ViewPost" component={ViewPost} options={{headerShown:false}}/>
           <Stack.Screen name="WelcomePage" component={WelcomePage} options={{headerShown:false}}/>
+          <Stack.Screen name="SearchResult" component={SearchResult} options={{headerShown:false}}/>
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
