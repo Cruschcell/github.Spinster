@@ -4,12 +4,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, {useState,useEffect} from 'react'
 import {launchImageLibrary} from 'react-native-image-picker';
 
-export default function Profile({navigation}) {
+export default function Profile({route,navigation}) {
   const[user,setUser] = useState(null);
   const[profileImage,setProfileImage]=useState(null);
   const[coverImage,setCoverImage]=useState(null);
   const [showOption,setShowOption]=useState(false);
-  const[isOwnProfile,setIsOwnProfile]=useState(true);
+  const {viewedUserId} = route.params || {};
+  const [isOwnProfile, setIsOwnProfile] = useState(true);
+  const [loading, setLoading] = useState(false);
+
 
   const[showEditModal,setShowEditModal]=useState(false);
   const[editType,setEditType]=useState('');
@@ -32,30 +35,6 @@ export default function Profile({navigation}) {
   const[bio,setBio]=useState('');
   const[showBioModal,setShowBioModal]=useState(false);
   const[bioInput,setBioInput]=useState('');
-
-
-  const getCurrentUser = async()=>{
-    try{
-      const currentUserJson=await AsyncStorage.getItem('currentUser');
-      if(currentUserJson){
-        const userData = JSON.parse(currentUserJson);
-        console.log('Current User: ', userData.username, userData.role,userData.id);
-        setUser(userData);
-
-        const savedProfileImage = await AsyncStorage.getItem(`profileImage_${userData.username}`);
-        if(savedProfileImage){setProfileImage(savedProfileImage)};
-        const savedCoverImage = await AsyncStorage.getItem(`coverImage_${userData.username}`);
-        if(savedCoverImage){setCoverImage(savedCoverImage)};
-        const savedBio = await AsyncStorage.getItem(`bio_${userData.id}`);
-        if(savedBio){setBio(savedBio)};
-
-        loadFriends(userData.id);
-        loadPosts(userData.id);
-      }
-    }catch(e){
-      console.log("Error getting current user",e);
-    }
-  };
 
   const loadFriends = async(userId) => {
     try{
@@ -80,26 +59,74 @@ export default function Profile({navigation}) {
     }
   };
 
-const openBioModal = () => {
-  setBioInput(bio);
-  setShowBioModal(true);
-};
+  const openBioModal = () => {
+    setBioInput(bio);
+    setShowBioModal(true);
+  };
 
-const saveBio = async() => {
-  try{
-    await AsyncStorage.setItem(`bio_${user.id}`, bioInput);
-    setBio(bioInput);
-    setShowBioModal(false);
-    Alert.alert('Success', 'Bio updated successfully');
-  }catch(e){
-    console.log('Error saving bio:', e);
-    Alert.alert('Error', 'Failed to update bio');
-  }
-};
+  const saveBio = async() => {
+    try{
+      await AsyncStorage.setItem(`bio_${user.id}`, bioInput);
+      setBio(bioInput);
+      setShowBioModal(false);
+      Alert.alert('Success', 'Bio updated successfully');
+    }catch(e){
+      console.log('Error saving bio:', e);
+      Alert.alert('Error', 'Failed to update bio');
+    }
+  };
 
-  useEffect(()=>{
-    getCurrentUser()
-  },[]);
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const storedUsers = await AsyncStorage.getItem('users');
+        const allUsers = storedUsers ? JSON.parse(storedUsers) : [];
+        const currentUserData = await AsyncStorage.getItem('currentUser');
+        const currentUser = currentUserData ? JSON.parse(currentUserData) : null;
+        
+        let userToView = currentUser;
+        if (viewedUserId && viewedUserId !== currentUser?.id) {
+          const other = allUsers.find(u => u.id === viewedUserId);
+          if (other) {
+            userToView = other;
+            setIsOwnProfile(false);
+          }
+        } else {
+          setIsOwnProfile(true);
+        }
+        setUser(userToView);
+        if(userToView?.id){
+          loadFriends(userToView.id);
+          loadPosts(userToView.id);
+        }
+        try {
+          const storedProfileImage = await AsyncStorage.getItem(`profileImage_${userToView.username}`);
+          const storedCoverImage = await AsyncStorage.getItem(`coverImage_${userToView.username}`);
+          if (storedProfileImage) setProfileImage(storedProfileImage);
+          if (storedCoverImage) setCoverImage(storedCoverImage);
+        } catch (e) {
+          console.log('Error loading profile/cover images:', e);
+        }
+      } catch (e) {
+        console.log('Error loading profile:', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadProfile();
+      }, [viewedUserId]);
+      useEffect(() => {
+      const loadBio = async () => {
+        if (!user?.id) return;
+        try {
+          const storedBio = await AsyncStorage.getItem(`bio_${user.id}`);
+          if (storedBio) setBio(storedBio);
+        } catch (e) {
+          console.log('Error loading bio:', e);
+        }
+      };
+      loadBio();
+    }, [user]);
 
   const openEditModal = (type) =>{
     setEditType(type);
@@ -158,13 +185,8 @@ const saveBio = async() => {
         case 'email':
           updatedUser.email=editValue;
           break;
-        case 'editBio':
-          openBioModal();
-          break;
       }
-      
       await AsyncStorage.setItem('currentUser', JSON.stringify(updatedUser));
-      
       const usersJson = await AsyncStorage.getItem('users');
       if (usersJson) {
         const users = JSON.parse(usersJson);
@@ -174,7 +196,6 @@ const saveBio = async() => {
           await AsyncStorage.setItem('users', JSON.stringify(users));
         }
       }
-      
       setUser(updatedUser);
       setShowEditModal(false);
       Alert.alert('Success',`${editType.charAt(0).toUpperCase() + editType.slice(1)} updated successfully`);
@@ -276,7 +297,6 @@ const saveBio = async() => {
     const options ={
       mediaType:'photo',
       quality:0.8,
-      includedBase64:false,
     };
     launchImageLibrary(options, async (response) => {
       if (response.didCancel) {
@@ -309,6 +329,19 @@ const saveBio = async() => {
         } else {
           setCoverImage(imageUri);
           await AsyncStorage.setItem(`coverImage_${user.username}`, imageUri);
+          const updatedUser = { ...user, coverImage: imageUri };
+          setUser(updatedUser);
+          await AsyncStorage.setItem('currentUser', JSON.stringify(updatedUser));
+          
+          const usersJson = await AsyncStorage.getItem('users');
+            if (usersJson) {
+              const users = JSON.parse(usersJson);
+              const userIndex = users.findIndex(u => u.id === user.id);
+              if (userIndex !== -1) {
+                users[userIndex].coverImage = imageUri;
+                await AsyncStorage.setItem('users', JSON.stringify(users));
+              }
+            }
         }
       }
     });
@@ -366,6 +399,11 @@ const saveBio = async() => {
         )}
       </View>
     );
+  };
+
+  const viewImage = (uri) => {
+    if (!uri) return;
+    navigation.navigate('ImageViewer', { imageUri: uri });
   };
 
   const renderContent = () => {
@@ -652,9 +690,19 @@ const saveBio = async() => {
       </Modal>
 
       <View style={styles.headerSection}>
-        <TouchableOpacity style={styles.coverImageContainer} onPress={()=>pickImage('cover')}>
+       <TouchableOpacity
+          style={styles.coverImageContainer}
+          onPress={() => {
+            if (isOwnProfile) {
+              pickImage('cover');
+            } else if (coverImage) {
+              viewImage(coverImage);
+            }
+          }}
+          disabled={!isOwnProfile && !coverImage}
+        >
           {coverImage ? (
-            <Image source={{uri: coverImage}} style={styles.coverImage}/>
+            <Image source={{ uri: coverImage }} style={styles.coverImage} />
           ) : (
             <View style={styles.coverImagePlaceholder} />
           )}
@@ -664,7 +712,7 @@ const saveBio = async() => {
         </TouchableOpacity>
         {showOption && (
           <View style={styles.optionContainer}>
-            {isOwnProfile ? (
+            {isOwnProfile && (
               <>
                 <TouchableOpacity style={styles.optionItem} onPress={()=>handleOptionMenu('editUsername')}>
                   <Text style={styles.optionText}>Edit Username</Text>
@@ -682,7 +730,7 @@ const saveBio = async() => {
                   <Text style={[styles.optionText, styles.logoutText]}>Logout</Text>
                 </TouchableOpacity>
               </>
-            ) : (
+            )} {!isOwnProfile && (
               <>
                 <TouchableOpacity style={styles.optionItem} onPress={()=>handleOptionMenu('addFriend')}>
                   <Text style={styles.optionText}>Add Friend</Text>
@@ -698,12 +746,24 @@ const saveBio = async() => {
           </View>
         )}
         <View style={styles.profileSection}>
-          <TouchableOpacity style={styles.profileContainer} onPress={()=>pickImage('profile')}>
+          <TouchableOpacity
+            style={styles.profileContainer}
+            onPress={() => {
+              if (isOwnProfile) {
+                pickImage('profile');
+              } else if (profileImage) {
+                viewImage(profileImage);
+              }
+            }}
+            disabled={!isOwnProfile && !profileImage}
+          >
             <View style={styles.profile}>
               {profileImage ? (
-                <Image source={{uri:profileImage}} style={styles.profileImage}/>
+                <Image source={{ uri: profileImage }} style={styles.profileImage} />
               ) : (
-                <Text style={styles.profilePlaceholder}>{user?.username.charAt(0).toUpperCase()}</Text>
+                <Text style={styles.profilePlaceholder}>
+                  {user?.username?.charAt(0).toUpperCase()}
+                </Text>
               )}
             </View>
           </TouchableOpacity>
@@ -1015,7 +1075,6 @@ const styles = StyleSheet.create({
   paddingTop: 10,
   paddingBottom: 100,
 },
-
   friendsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
