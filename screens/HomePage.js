@@ -7,13 +7,19 @@ import { Path, Defs, Text as SvgText, TextPath, Svg } from 'react-native-svg';
 
 const {height} = Dimensions.get('window');
 
-
 export default function HomePage({navigation}) {
   const [winnerPost, setWinnerPost]=useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const slideAnim = useRef(new Animated.Value(height)).current;
   const[user,setUser]=useState(null);
   const[searchQuery,setSearchQuery]=useState("");
+  const [posts, setPosts] = useState([]);
+  const [segments, setSegments] = useState([]);
+  const [spinsRemaining, setSpinsRemaining] = useState(3);
+  const [canViewPost, setCanViewPost] = useState(false);
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [lastResetDate, setLastResetDate] = useState(null);
+  const [pickedPostIds, setPickedPostIds] = useState([]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -42,19 +48,203 @@ export default function HomePage({navigation}) {
       },
     })
   ).current;
-  const segments = [
-    { text: 'Post #1', textColour: 'black', backgroundColour: '#FFCC00' },
-    { text: 'Post #2', textColour: 'black', backgroundColour: '#fff' },
-    { text: 'Post #3', textColour: 'black', backgroundColour: '#FFCC00' },
-    { text: 'Post #4', textColour: 'black', backgroundColour: '#fff' },
-    { text: 'Post #5', textColour: 'black', backgroundColour: '#FFCC00' },
-    { text: 'Post #6', textColour: 'black', backgroundColour: '#fff' },
-  ];
+  
+  useEffect(() => {
+    loadSpinData();
+    loadPostsForRoulette();
+  }, []);
+  
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadSpinData();
+      loadPostsForRoulette();
+    });
+    return unsubscribe;
+  }, [navigation]);
 
-  const finishedSpinning = (segment)=>{
+  const loadSpinData = async () => {
+    try {
+      const spinData = await AsyncStorage.getItem('spinData');
+      if (spinData) {
+        const { spins, lastReset, viewedPost, pickedPosts } = JSON.parse(spinData);
+        const today = new Date().toDateString();
+
+        if (lastReset !== today) {
+          await AsyncStorage.setItem('spinData', JSON.stringify({
+            spins: 3,
+            lastReset: today,
+            viewedPost: null,
+            pickedPosts: []
+          }));
+          setSpinsRemaining(3);
+          setCanViewPost(false);
+          setSelectedPost(null);
+          setPickedPostIds([]);
+        } else {
+          setSpinsRemaining(spins);
+          setCanViewPost(viewedPost !== null);
+          setSelectedPost(viewedPost);
+          setPickedPostIds(pickedPosts || []);
+        }
+        setLastResetDate(lastReset);
+      } else {
+        const today = new Date().toDateString();
+        await AsyncStorage.setItem('spinData', JSON.stringify({
+          spins: 3,
+          lastReset: today,
+          viewedPost: null,
+          pickedPosts: []
+        }));
+        setLastResetDate(today);
+      }
+    } catch (e) {
+      console.log('Error loading spin data:', e);
+    }
+  };
+
+  const loadPostsForRoulette = async () => {
+    try {
+      const currentUserJson = await AsyncStorage.getItem('currentUser');
+      const currentUser = currentUserJson ? JSON.parse(currentUserJson) : null;
+
+      const usersJson = await AsyncStorage.getItem('users');
+      const users = usersJson ? JSON.parse(usersJson) : [];
+      
+      let allPosts = [];
+      for (const user of users) {
+        const userPostsJson = await AsyncStorage.getItem(`posts_${user.id}`);
+        if (userPostsJson) {
+          const userPosts = JSON.parse(userPostsJson);
+          const postsWithUser = userPosts.map(post => ({
+            ...post,
+            author: {
+              id: user.id,
+              username: user.username,
+              handle: user.handle,
+              profileImage: user.profileImage
+            }
+          }));
+          allPosts = [...allPosts, ...postsWithUser];
+        }
+      }
+      
+      // Filter out current user's posts AND already picked posts
+      const spinData = await AsyncStorage.getItem('spinData');
+      const pickedPosts = spinData ? JSON.parse(spinData).pickedPosts || [] : [];
+      
+      const filteredPosts = allPosts.filter(post => {
+        const notCurrentUser = !currentUser || post.author.id !== currentUser.id;
+        const notPicked = !pickedPosts.includes(post.id);
+        return notCurrentUser && notPicked;
+      });
+
+      setPosts(filteredPosts);
+
+      if (filteredPosts.length > 0) {
+        const rouletteSegments = filteredPosts.slice(0, 6).map((post, index) => ({
+          text: `Post #${index + 1}`,
+          textColour: 'black',
+          backgroundColour: index % 2 === 0 ? '#FFCC00' : '#fff',
+          postData: post
+        }));
+        setSegments(rouletteSegments);
+      } else {
+        const defaultSegments = Array(6)
+          .fill(0)
+          .map((_, index) => ({
+            text: 'Empty',
+            textColour: '#999',
+            backgroundColour: index % 2 === 0 ? '#ddd' : '#eee',
+            postData: null
+          }));
+        setSegments(defaultSegments);
+        setTimeout(() => {
+          Alert.alert(
+            'No Posts Available', 
+            'There are no posts to spin right now. Check back later when more users have posted!',
+            [{ text: 'OK' }]
+          );
+        }, 500);
+      }
+    } catch (e) {
+      console.log('Error loading posts for roulette:', e);
+    }
+  };
+  
+  const finishedSpinning = async (segment) => {
+    if (spinsRemaining <= 0) {
+      Alert.alert('No spins left!', 'Wait until tomorrow to spin again.');
+      return;
+    }
+
     console.log('Winner', segment);
-    setWinnerPost(segment);
-    Alert.alert('Winner: ',segment);
+    const winningSegment = segments.find(s => s.text === segment.text);
+
+    if (!winningSegment || !winningSegment.postData) {
+      Alert.alert('No Post', 'No post available for this segment. Try again later!');
+      return;
+    }
+
+    try {
+      const newSpins = Math.max(spinsRemaining - 1, 0);
+      const newPickedPosts = [...pickedPostIds, winningSegment.postData.id];
+      
+      setSpinsRemaining(newSpins);
+      setSelectedPost(winningSegment.postData);
+      setCanViewPost(true);
+      setPickedPostIds(newPickedPosts);
+
+      // Update spin data with picked posts
+      await updateSpinData(newSpins, winningSegment.postData, newPickedPosts);
+
+      // Save to spin bin
+      const spinBinJson = await AsyncStorage.getItem('spinBin');
+      const spinBin = spinBinJson ? JSON.parse(spinBinJson) : [];
+      spinBin.unshift({ ...winningSegment.postData, spunAt: Date.now() });
+      await AsyncStorage.setItem('spinBin', JSON.stringify(spinBin));
+
+      // Reload posts to update wheel (removes picked post)
+      await loadPostsForRoulette();
+      
+      Alert.alert(
+        'Winner!',
+        `You won: ${winningSegment.postData.content.substring(0, 50)}...\n\nSpins remaining: ${newSpins}/3`,
+        [{ text: 'OK' }]
+      );
+    } catch (e) {
+      console.log('Error saving spin result:', e);
+      Alert.alert('Error', 'Failed to save spin result');
+    }
+  };
+  
+  const updateSpinData = async (newSpins, viewedPost, pickedPosts) => {
+    await AsyncStorage.setItem('spinData', JSON.stringify({
+      spins: newSpins,
+      lastReset: new Date().toDateString(),
+      viewedPost,
+      pickedPosts
+    }));
+  };
+
+  //remove later
+  const resetSpins = async () => {
+    try {
+      const resetData = {
+        spins: 3,
+        lastReset: new Date().toDateString(),
+        viewedPost: null,
+        pickedPosts: [],
+      };
+      await AsyncStorage.setItem('spinData', JSON.stringify(resetData));
+      setSpinsRemaining(3);
+      setCanViewPost(false);
+      setSelectedPost(null);
+      setPickedPostIds([]);
+      await loadPostsForRoulette();
+      Alert.alert('Spins reset!', 'You now have 3 spins again.');
+    } catch (error) {
+      console.log('Error resetting spins:', error);
+    }
   };
 
   const toggleMenu = () => {
@@ -84,6 +274,7 @@ export default function HomePage({navigation}) {
       }
     }, 300);
   };
+  
   const handleSearch=()=>{
     if(searchQuery.trim()){
       navigation.navigate('SearchResult',{
@@ -133,27 +324,43 @@ export default function HomePage({navigation}) {
             <Wheel
               segments={segments}
               segColors={segments.map((segment) => segment.backgroundColour)}
-              onFinished={(segment) => finishedSpinning(segment.text)}
+              onFinished={(segment) => finishedSpinning(segment)}
               textColors={segments.map((segment) => segment.textColour)}
-              buttonText="Spin 3/3"
+              buttonText={`Spin ${spinsRemaining}/3`}
               backgroundImage={require('../assets/out.png')}
               buttonTextStyles={{
-                color:"#000",
-                fontWeight:'bold'
+                color: "#000",
+                fontWeight: 'bold'
               }}
               outlineWidth={1}
               buttonStyle={{
-                backgroundColor: '#FFCC00',
-                shadowColor:"#000",
-                shadowOffset:{width:0,height:4},
-                shadowOpacity:0.6,
-                shadowRadius:4,
-                elevation:10
+                backgroundColor: spinsRemaining > 0 && posts.length > 0 ? '#FFCC00' : '#999',
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.6,
+                shadowRadius: 4,
+                elevation: 10
               }}
               size={300}
+              isSpinning={spinsRemaining <= 0 || posts.length === 0}
             />
-            <TouchableOpacity style={styles.viewPostBtn}>
-              <Text style={styles.viewBtnText}>View Post</Text>
+           <TouchableOpacity 
+              style={[
+                styles.viewPostBtn, 
+                !canViewPost && styles.viewPostBtnDisabled
+              ]} 
+              onPress={() => {
+                if (canViewPost && selectedPost) {
+                  navigation.navigate('ViewPost', { post: selectedPost });
+                } else {
+                  Alert.alert('Spin First!', 'You need to spin the wheel to view a post');
+                }
+              }}
+              disabled={!canViewPost}
+            >
+              <Text style={styles.viewBtnText}>
+                {canViewPost ? 'View Post' : 'Spin First!'}
+              </Text>
             </TouchableOpacity>
             <Image
               source={require('../assets/pin.png')}
@@ -207,9 +414,11 @@ export default function HomePage({navigation}) {
               <View style={styles.menuContent}>
                 <TouchableOpacity 
                   style={styles.menuItem} 
-                  onPress={() => handleMenuItemPress('Spin Bin')}
-                >
+                  onPress={() => navigation.navigate('SpinBin')}>
                   <Text style={styles.menuItemText}>🗑 Spin Bin</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={resetSpins}
+                style={{backgroundColor:"#fff",padding:10,borderRadius:10,marginTop:10}}>
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.menuItem} 
@@ -445,5 +654,9 @@ const styles = StyleSheet.create({
     width:20,
     height:20,
     tintColor:'#7D0AD1',
+  },
+  viewPostBtnDisabled: {
+    backgroundColor: '#555',
+    opacity: 0.5,
   },
 })
