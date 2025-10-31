@@ -13,7 +13,6 @@ export default function Profile({route,navigation}) {
   const [isOwnProfile, setIsOwnProfile] = useState(true);
   const [loading, setLoading] = useState(false);
 
-
   const[showEditModal,setShowEditModal]=useState(false);
   const[editType,setEditType]=useState('');
   const[editValue,setEditValue]=useState('');
@@ -28,6 +27,10 @@ export default function Profile({route,navigation}) {
 
   const[friends,setFriends]=useState([]);
   const[showFriendsModal,setShowFriendsModal]=useState(false);
+  const [friendRequests,setFriendRequests]=useState([]);
+  const[currentUserFriends,setCurrentUserFriends]=useState([]);
+  const[isFriend,setIsFriend]=useState(false);
+  const[showRequestsModal,setShowRequestsModal]=useState(false);
   const[friendSearchQuery,setFriendSearchQuery]=useState('');
   const[activeTab,setActiveTab]=useState('friends');
 
@@ -47,6 +50,140 @@ export default function Profile({route,navigation}) {
       console.log('Error loading friends:', e);
     }
   };
+  const loadFriendRequests = async(userId)=>{
+    try{
+      const requestsJson = await AsyncStorage.getItem(`friendRequests_${userId}`);
+      if(requestsJson){
+        const requestsList = JSON.parse(requestsJson);
+        setFriendRequests(requestsList);
+      }
+    }catch(e){
+      console.log('Error loading friend request',e)
+    }
+  };
+  const sendFriendRequest = async()=>{
+    if(!user || !viewedUserId){
+      return;
+    }
+    try{
+      const currentUserData=await AsyncStorage.getItem('currentUser');
+      const currentUser = currentUserData ? JSON.parse(currentUserData):null;
+      if(!currentUser){
+        return;
+      }
+      if(friends.some(f=>f.id===currentUser.id)){
+        Alert.alert('Already friends', 'You are already friends with this user');
+        return;
+      }
+      const requestsJson = await AsyncStorage.getItem(`friendRequests_${viewedUserId}`);
+      const requests = requestsJson ? JSON.parse(requestsJson):[];
+
+      if(requests.some(r=>r.id===currentUser.id)){
+        Alert.alert('Pending request','Friend request already sent, wait for confirmation');
+        return;
+      }
+      requests.push({
+        id:currentUser.id,
+        username:currentUser.username,
+        handle:currentUser.handle,
+        profileImage:currentUser.profileImage,
+        timeStamp:Date.now()
+      });
+      await AsyncStorage.setItem(`friendRequests_${viewedUserId}`, JSON.stringify(requests));
+      Alert.alert('Success', 'Friend request sent');
+    }catch (e){
+      console.log('Error sending friend request',e);
+      Alert.alert('Error','Failed to send friend request, please try again');
+    }
+  };
+  const acceptFriendRequest = async(requestUser)=>{
+    try{
+      const newFriend = {
+        id:requestUser.id,
+        username:requestUser.username,
+        handle:requestUser.handle,
+        profileImage:requestUser.profileImage
+      };
+      const updatedFriends = [...friends,newFriend];
+      await AsyncStorage.setItem(`friends_${user.id}`,JSON.stringify(updatedFriends));
+      setFriends(updatedFriends);
+
+      const requesterFriendsJson = await AsyncStorage.getItem(`friends_${requestUser.id}`);
+      const requesterFriends = requesterFriendsJson ? JSON.parse(requesterFriendsJson):[];
+      requesterFriends.push({
+        id:user.id,
+        username:user.username,
+        handle:user.handle,
+        profileImage:user.profileImage
+      });
+      await AsyncStorage.setItem(`friends_${requestUser.id}`,JSON.stringify(requesterFriends));
+
+      const updatedRequests = friendRequests.filter(r=>r.id!==requestUser.id);
+      await AsyncStorage.setItem(`friendRequests_${user.id}`,JSON.stringify(updatedRequests))
+      setFriendRequests(updatedRequests);
+      Alert.alert('Success', `You are now friends with ${requestUser.username}`);
+    }catch(e){
+      console.log('Error accepting friend request',e);
+      Alert.alert('Error','Failed to accept friend request');
+    }
+  };
+  const declineFriendRequest = async(requestUser) =>{
+    try{
+      const updatedRequests = friendRequests.filter(r=>r.id!==requestUser.id);
+      await AsyncStorage.setItem(`friendRequests_${user.id}`,JSON.stringify(updatedRequests));
+      setFriendRequests(updatedRequests);
+      Alert.alert('Declined','Friend request declined :(');
+    }catch(e){
+      console.log('Error declining friend request');
+      Alert.alert('Error','Failed to decline friend request');
+    }
+  };
+  const unfriendUser = async (friendToRemove) => {
+    try {
+      const currentUserData = await AsyncStorage.getItem('currentUser');
+      const currentUser = currentUserData ? JSON.parse(currentUserData) : null;
+      if (!currentUser) return;
+
+      Alert.alert(
+        'Unfriend',
+        `Are you sure you want to unfriend ${friendToRemove.username}?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Unfriend',
+            style: 'destructive',
+            onPress: async () => {
+              const currentFriendsJson = await AsyncStorage.getItem(`friends_${currentUser.id}`);
+              const currentFriends = currentFriendsJson ? JSON.parse(currentFriendsJson) : [];
+
+              const otherFriendsJson = await AsyncStorage.getItem(`friends_${friendToRemove.id}`);
+              const otherFriends = otherFriendsJson ? JSON.parse(otherFriendsJson) : [];
+              
+              const updatedCurrentFriends = currentFriends.filter(f => f.id !== friendToRemove.id && f.id !== currentUser.id);
+              const updatedOtherFriends = otherFriends.filter(f => f.id !== currentUser.id && f.id !== friendToRemove.id);
+
+              await AsyncStorage.setItem(`friends_${currentUser.id}`, JSON.stringify(updatedCurrentFriends));
+              await AsyncStorage.setItem(`friends_${friendToRemove.id}`, JSON.stringify(updatedOtherFriends));
+
+              setFriends(updatedCurrentFriends);
+              setIsFriend(false);
+              setShowFriendsModal(false);
+              if (!isOwnProfile) {
+                const refreshed = await AsyncStorage.getItem(`friends_${currentUser.id}`);
+                setCurrentUserFriends(refreshed ? JSON.parse(refreshed) : []);
+              }
+
+              Alert.alert('Unfriended', `You are no longer friends with ${friendToRemove.username}`);
+            }
+          }
+        ]
+      );
+    } catch (e) {
+      console.log('Error unfriending user', e);
+      Alert.alert('Error', 'Failed to unfriend user');
+    }
+  };
+
   const loadPosts = async(userId) => {
     try{
       const postsJson = await AsyncStorage.getItem(`posts_${userId}`);
@@ -75,58 +212,93 @@ export default function Profile({route,navigation}) {
       Alert.alert('Error', 'Failed to update bio');
     }
   };
-
   useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        const storedUsers = await AsyncStorage.getItem('users');
-        const allUsers = storedUsers ? JSON.parse(storedUsers) : [];
-        const currentUserData = await AsyncStorage.getItem('currentUser');
-        const currentUser = currentUserData ? JSON.parse(currentUserData) : null;
-        
-        let userToView = currentUser;
-        if (viewedUserId && viewedUserId !== currentUser?.id) {
-          const other = allUsers.find(u => u.id === viewedUserId);
-          if (other) {
-            userToView = other;
-            setIsOwnProfile(false);
-          }
-        } else {
-          setIsOwnProfile(true);
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadProfile();
+    });
+    return unsubscribe;
+  }, [navigation, viewedUserId]);
+
+  const loadProfile = async () => {
+    try {
+      const storedUsers = await AsyncStorage.getItem('users');
+      const allUsers = storedUsers ? JSON.parse(storedUsers) : [];
+      const currentUserData = await AsyncStorage.getItem('currentUser');
+      const currentUser = currentUserData ? JSON.parse(currentUserData) : null;
+
+      let userToView = currentUser;
+      const viewingOwnProfile = !viewedUserId || viewedUserId === currentUser?.id;
+      if (viewedUserId) {
+        const freshUser = allUsers.find(u => u.id === viewedUserId);
+        if (freshUser) {
+          userToView = freshUser;
         }
-        setUser(userToView);
-        if(userToView?.id){
-          loadFriends(userToView.id);
-          loadPosts(userToView.id);
-        }
-        try {
-          const storedProfileImage = await AsyncStorage.getItem(`profileImage_${userToView.username}`);
-          const storedCoverImage = await AsyncStorage.getItem(`coverImage_${userToView.username}`);
-          if (storedProfileImage) setProfileImage(storedProfileImage);
-          if (storedCoverImage) setCoverImage(storedCoverImage);
-        } catch (e) {
-          console.log('Error loading profile/cover images:', e);
-        }
-      } catch (e) {
-        console.log('Error loading profile:', e);
-      } finally {
-        setLoading(false);
       }
-    };
-    loadProfile();
-      }, [viewedUserId]);
-      useEffect(() => {
-      const loadBio = async () => {
-        if (!user?.id) return;
-        try {
-          const storedBio = await AsyncStorage.getItem(`bio_${user.id}`);
-          if (storedBio) setBio(storedBio);
-        } catch (e) {
-          console.log('Error loading bio:', e);
+
+      setIsOwnProfile(viewingOwnProfile);
+      setUser(userToView);
+
+      if (userToView?.id) {
+        await loadFriends(userToView.id);
+        await loadPosts(userToView.id);
+        if (viewingOwnProfile) {
+          await loadFriendRequests(userToView.id);
+        } else {
+          const currentUserFriendsJson = await AsyncStorage.getItem(`friends_${currentUser.id}`);
+          if (currentUserFriendsJson) {
+            setCurrentUserFriends(JSON.parse(currentUserFriendsJson));
+          }
         }
-      };
-      loadBio();
-    }, [user]);
+      }
+
+      try {
+        const storedProfileImage = await AsyncStorage.getItem(`profileImage_${userToView.username}`);
+        const storedCoverImage = await AsyncStorage.getItem(`coverImage_${userToView.username}`);
+        if (storedProfileImage) setProfileImage(storedProfileImage);
+        if (storedCoverImage) setCoverImage(storedCoverImage);
+      } catch (e) {
+        console.log('Error loading profile/cover images:', e);
+      }
+    } catch (e) {
+      console.log('Error loading profile:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+      
+  useEffect(() => {
+  if(!isOwnProfile && viewedUserId){
+    const checkFriendship = currentUserFriends.some(f=>f.id===viewedUserId);
+    setIsFriend(checkFriendship);
+  }
+  const loadBio = async () => {
+    if (!user?.id) return;
+    try {
+      const storedBio = await AsyncStorage.getItem(`bio_${user.id}`);
+      if (storedBio) setBio(storedBio);
+    } catch (e) {
+      console.log('Error loading bio:', e);
+    }
+  };
+  loadBio();
+  }, [currentUserFriends,viewedUserId,isOwnProfile,user]);
+  
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', async () => {
+      if (user?.id) {
+        await loadFriends(user.id);
+        if (!isOwnProfile) {
+          const currentUserData = await AsyncStorage.getItem('currentUser');
+          const currentUser = currentUserData ? JSON.parse(currentUserData) : null;
+          if (currentUser) {
+            const updated = await AsyncStorage.getItem(`friends_${currentUser.id}`);
+            setCurrentUserFriends(updated ? JSON.parse(updated) : []);
+          }
+        }
+      }
+    });
+    return unsubscribe;
+  }, [navigation, user, isOwnProfile]);
 
   const openEditModal = (type) =>{
     setEditType(type);
@@ -174,6 +346,7 @@ export default function Profile({route,navigation}) {
       return;
     }
     try{
+      const oldUsername = user.username;
       const updatedUser={...user};
       switch(editType){
         case 'username':
@@ -185,17 +358,32 @@ export default function Profile({route,navigation}) {
         case 'email':
           updatedUser.email=editValue;
           break;
-      }
-      await AsyncStorage.setItem('currentUser', JSON.stringify(updatedUser));
-      const usersJson = await AsyncStorage.getItem('users');
-      if (usersJson) {
-        const users = JSON.parse(usersJson);
-        const userIndex = users.findIndex(u => u.id === user.id);
-        if (userIndex !== -1) {
-          users[userIndex] = updatedUser;
-          await AsyncStorage.setItem('users', JSON.stringify(users));
+      }updatedUser.profileImage = user.profileImage || profileImage;
+      if(editType==='username' && oldUsername !==editValue){
+        const oldProfileImg =await AsyncStorage.getItem(`profileImage_${oldUsername}`);
+        const oldCoverImg = await AsyncStorage.getItem(`coverImage_${oldUsername}`);
+
+        if(oldProfileImg){
+          await AsyncStorage.setItem(`profileImage_${editValue}`, oldProfileImg);
+          await AsyncStorage.removeItem(`profileImage_${oldUsername}`);
+        }
+        if(oldCoverImg){
+          await AsyncStorage.setItem(`coverImage_${editValue}`, oldCoverImg);
+          await AsyncStorage.removeItem(`coverImage_${oldUsername}`);
         }
       }
+      await AsyncStorage.setItem('currentUser', JSON.stringify(updatedUser));
+      await updateFriendRecords(updatedUser);
+
+      const usersJson = await AsyncStorage.getItem('users');
+        if (usersJson) {
+          const users = JSON.parse(usersJson);
+          const index = users.findIndex(u => u.id === user.id);
+          if (index !== -1) {
+            users[index] = updatedUser;
+            await AsyncStorage.setItem('users', JSON.stringify(users));
+          }
+        }
       setUser(updatedUser);
       setShowEditModal(false);
       Alert.alert('Success',`${editType.charAt(0).toUpperCase() + editType.slice(1)} updated successfully`);
@@ -203,39 +391,87 @@ export default function Profile({route,navigation}) {
       console.log('Error saving edit',e);
       Alert.alert('Error', 'Failed to update, please try again');
     }
-  }
+    await loadProfile();
+  };
+  
+  const updateFriendRecords = async (updatedUser) => {
+    try {
+      const allUsersJson = await AsyncStorage.getItem('users');
+      const allUsers = allUsersJson ? JSON.parse(allUsersJson) : [];
 
-   const savePassword = async () => {
-    if(!currentPassword || !newPassword || !confirmPassword){
+      for (const u of allUsers) {
+        const friendsJson = await AsyncStorage.getItem(`friends_${u.id}`);
+        if (!friendsJson) continue;
+
+        const friends = JSON.parse(friendsJson);
+        let changed = false;
+
+        const updatedFriends = friends.map(f => {
+          if (f.id === updatedUser.id) {
+            changed = true;
+            return {
+              ...f,
+              username: updatedUser.username,
+              handle: updatedUser.handle,
+              profileImage: updatedUser.profileImage
+            };
+          }
+          return f;
+        });
+
+        if (changed) {
+          await AsyncStorage.setItem(`friends_${u.id}`, JSON.stringify(updatedFriends));
+        }
+      }
+    } catch (e) {
+      console.log('Error updating friend records:', e);
+    }
+  };
+
+  const savePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
       Alert.alert('Error', 'All fields are required');
       return;
     }
-    if(currentPassword !== user.password){
+    if (currentPassword !== user.password) {
       Alert.alert('Error', 'Current password is incorrect');
       return;
     }
-    if(newPassword !== confirmPassword){
+    if (newPassword !== confirmPassword) {
       Alert.alert('Error', 'New passwords do not match');
       return;
     }
-    if(newPassword.length < 6){
+    if (newPassword.length < 6) {
       Alert.alert('Error', 'Password must be at least 6 characters long');
       return;
     }
-    if(newPassword === currentPassword){
+    if (newPassword === currentPassword) {
       Alert.alert('Error', 'New password must be different from current password');
       return;
     }
-    try{
-      const updatedUser = {...user, password: newPassword};
+
+    try {
+      const updatedUser = { ...user, password: newPassword };
+
       await AsyncStorage.setItem('currentUser', JSON.stringify(updatedUser));
+
+      const usersJson = await AsyncStorage.getItem('users');
+      if (usersJson) {
+        const users = JSON.parse(usersJson);
+        const index = users.findIndex(u => u.id === user.id);
+        if (index !== -1) {
+          users[index] = updatedUser;
+          await AsyncStorage.setItem('users', JSON.stringify(users));
+        }
+      }
+
       setUser(updatedUser);
       setShowPasswordModal(false);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       Alert.alert('Success', 'Password updated successfully');
-    }catch(e){
+    } catch (e) {
       console.log('Error saving password:', e);
       Alert.alert('Error', 'Failed to update password. Please try again.');
     }
@@ -263,7 +499,14 @@ export default function Profile({route,navigation}) {
         ]);
         break;
       case 'addFriend':
-        Alert.alert('Add Friend', 'Friend request sent');
+        if(isFriend){
+          const friendToRemove = currentUserFriends.find(f=>f.id===viewedUserId);
+          if(friendToRemove){
+            unfriendUser(friendToRemove);
+          }
+        }else{
+          sendFriendRequest();
+        }
         break;
       case 'report':
         Alert.alert('Report', 'Report functionality');
@@ -324,7 +567,7 @@ export default function Profile({route,navigation}) {
               await AsyncStorage.setItem('users', JSON.stringify(users));
             }
           }
-          
+          await updateFriendRecords(updatedUser)
           console.log('Profile image updated:', imageUri);
         } else {
           setCoverImage(imageUri);
@@ -342,6 +585,8 @@ export default function Profile({route,navigation}) {
                 await AsyncStorage.setItem('users', JSON.stringify(users));
               }
             }
+            await updateFriendRecords(updatedUser);
+            setUser(updatedUser);
         }
       }
     });
@@ -353,7 +598,9 @@ export default function Profile({route,navigation}) {
   );
 
   const renderFriendItem = (friend) => (
-    <TouchableOpacity key={friend.id} style={styles.friendItem}>
+    <TouchableOpacity key={friend.id} style={styles.friendItem}
+    onPress={()=>{setShowFriendsModal(false);navigation.push('Profile',{viewedUserId:friend.id});
+    }}>
       <View style={styles.friendAvatar}>
         {friend.profileImage ? (
           <Image source={{uri: friend.profileImage}} style={styles.friendAvatarImage}/>
@@ -365,6 +612,14 @@ export default function Profile({route,navigation}) {
         <Text style={styles.friendUsername}>{friend.username}</Text>
         <Text style={styles.friendHandle}>{friend.handle}</Text>
       </View>
+      {isOwnProfile && (
+        <TouchableOpacity 
+          style={styles.unfriendBtn}
+          onPress={() => unfriendUser(friend)}
+        >
+          <Text style={styles.unfriendBtnText}>Unfriend</Text>
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 
@@ -375,7 +630,8 @@ export default function Profile({route,navigation}) {
     return (
       <View style={styles.friendsGrid}>
         {displayFriends.map((friend) => (
-          <TouchableOpacity key={friend.id} style={styles.friendGridItem}>
+          <TouchableOpacity key={friend.id} style={styles.friendGridItem}
+          onPress={()=>navigation.push('Profile',{viewedUserId:friend.id})}>
             <View style={styles.friendGridAvatar}>
               {friend.profileImage ? (
                 <Image source={{uri: friend.profileImage}} style={styles.friendGridAvatarImage}/>
@@ -411,6 +667,17 @@ export default function Profile({route,navigation}) {
       case 'friends':
         return (
           <View style={styles.tabContent}>
+            {isOwnProfile && friendRequests.length > 0 && (
+              <TouchableOpacity 
+                style={styles.requestNotification}
+                onPress={()=>setShowRequestsModal(true)}
+              >
+                <Text style={styles.requestNotificationText}>
+                  You have {friendRequests.length} friend request{friendRequests.length > 1 ? 's' : ''}
+                </Text>
+                <Text style={styles.requestNotificationArrow}>→</Text>
+              </TouchableOpacity>
+            )}
             {friends.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>No friends yet</Text>
@@ -421,12 +688,18 @@ export default function Profile({route,navigation}) {
           </View>
         );
       case 'posts':
+        const canViewPosts = isOwnProfile || isFriend;
         return (
           <ScrollView 
             style={styles.tabContent} 
             contentContainerStyle={{paddingBottom: 100}}
             showsVerticalScrollIndicator={false}>            
-          {posts.length === 0 ? (
+            {!canViewPosts ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>Cannot view posts</Text>
+                <Text style={styles.emptyStateText}>Friends only</Text>
+              </View>
+            ) : posts.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>No posts yet</Text>
               </View>
@@ -436,7 +709,10 @@ export default function Profile({route,navigation}) {
                   key={post.id} 
                   style={styles.postItem}
                   activeOpacity={0.7}
-                  onPress={() => Alert.alert('Post', 'Post clicked!')}
+                  onPress={() => navigation.navigate('PostDetail', { 
+                    postId: post.id,
+                    userId: user.id 
+                  })}
                 >
                   <View style={styles.postHeader}>
                     <View style={styles.postUserInfo}>
@@ -689,6 +965,70 @@ export default function Profile({route,navigation}) {
         </View>
       </Modal>
 
+      <Modal
+        visible={showRequestsModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={()=>setShowRequestsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.friendsModalContainer}>
+            <View style={styles.friendsModalHeader}>
+              <Text style={styles.friendsModalTitle}>Friend Requests ({friendRequests.length})</Text>
+              <TouchableOpacity onPress={()=>setShowRequestsModal(false)}>
+                <Text style={styles.friendsModalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.friendsList}>
+              {friendRequests.length > 0 ? (
+                friendRequests.map(request => (
+                  <View key={request.id} style={styles.requestItem}>
+                    <TouchableOpacity 
+                      style={{flexDirection: 'row', alignItems: 'center', flex: 1}}
+                      onPress={() => {
+                        setShowRequestsModal(false);
+                        navigation.push('Profile', { viewedUserId: request.id });
+                      }}
+                    >
+                      <View style={styles.friendAvatar}>
+                        {request.profileImage ? (
+                          <Image source={{uri: request.profileImage}} style={styles.friendAvatarImage}/>
+                        ) : (
+                          <Text style={styles.friendAvatarText}>{request.username.charAt(0).toUpperCase()}</Text>
+                        )}
+                      </View>
+                      <View style={styles.requestInfo}>
+                        <Text style={styles.friendUsername}>{request.username}</Text>
+                        <Text style={styles.friendHandle}>{request.handle}</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <View style={styles.requestButtons}>
+                      <TouchableOpacity 
+                        style={styles.acceptBtn}
+                        onPress={()=>acceptFriendRequest(request)}
+                      >
+                        <Text style={styles.acceptBtnText}>Accept</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={styles.declineBtn}
+                        onPress={()=>declineFriendRequest(request)}
+                      >
+                        <Text style={styles.declineBtnText}>Decline</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>No friend requests</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.headerSection}>
        <TouchableOpacity
           style={styles.coverImageContainer}
@@ -733,7 +1073,7 @@ export default function Profile({route,navigation}) {
             )} {!isOwnProfile && (
               <>
                 <TouchableOpacity style={styles.optionItem} onPress={()=>handleOptionMenu('addFriend')}>
-                  <Text style={styles.optionText}>Add Friend</Text>
+                  <Text style={styles.optionText}>{isFriend? 'Unfriend':'Add Friend'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.optionItem} onPress={()=>handleOptionMenu('report')}>
                   <Text style={styles.optionText}>Report</Text>
@@ -1070,19 +1410,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tabContent: {
-  flex: 1,
-  paddingHorizontal: 20,
-  paddingTop: 10,
-  paddingBottom: 100,
-},
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 100,
+  },
   friendsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
     paddingVertical: 10,
   },
   friendGridItem: {
     width: '30%',
+    marginLeft:10,
     alignItems: 'center',
     marginBottom: 20,
   },
@@ -1303,5 +1643,70 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'right',
     marginBottom: 15,
+  },
+  requestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2a2a2a',
+  },
+  requestInfo: {
+    flex: 1,
+    marginLeft: -8,
+  },
+  requestButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  acceptBtn: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  acceptBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  declineBtn: {
+    backgroundColor: '#666',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  declineBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  requestNotification: {
+    backgroundColor: '#7D0AD1',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 15,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  requestNotificationText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  requestNotificationArrow: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  unfriendBtn: {
+    backgroundColor: '#dc3545',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  unfriendBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
